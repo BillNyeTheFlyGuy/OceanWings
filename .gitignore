@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Local/editor noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# OceanWings generated outputs
+*_CellAreas.csv
+*_Peaks.csv
+*_Clusters.csv
+*_WingDiscShape.csv
+*_APIntensityProfile.csv
+_CellAreas.csv
+_Peaks.csv
+_Clusters.csv
+_WingDiscShape.csv
+_APIntensityProfile.csv
+_nuclei_output/
+*_VoronoiLabels.tif
+
+# Large microscopy/probability data should stay local unless deliberately added
+*.tif
+*.tiff
+*.h5
+*.hdf5
