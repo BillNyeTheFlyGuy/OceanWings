@@ -1,0 +1,7 @@
+numpy
+h5py
+tifffile
+matplotlib
+scikit-image
+scipy
+hdbscan
