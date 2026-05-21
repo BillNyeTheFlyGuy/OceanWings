@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     "core_peak_min_distance": 4,
     "gaussian_sigma": 1.0,
     "core_peak_prob_threshold": 0.5,
+    "use_cellarea_gap_guided_watershed": True,
     "hdbscan_min_cluster_size": 25,
     "hdbscan_min_samples": 10,
     "hdbscan_nn_cv_max": 0.35,
@@ -244,6 +245,20 @@ def make_combined_disc_mask(dapi_slice, _cellarea_slice, config):
     return disc_mask
 
 
+def make_watershed_gradient(cellarea_slice, disc_mask, config):
+    if not config.get("use_cellarea_gap_guided_watershed", False):
+        return np.zeros_like(cellarea_slice, dtype=float)
+
+    gradient = np.asarray(cellarea_slice, dtype=float)
+    finite_vals = gradient[np.isfinite(gradient)]
+    fill_low = float(np.min(finite_vals)) if finite_vals.size else 0.0
+    fill_high = float(np.max(finite_vals)) if finite_vals.size else 1.0
+    gradient = np.nan_to_num(gradient, nan=fill_low, posinf=fill_high, neginf=fill_low)
+    gradient = gradient.copy()
+    gradient[~disc_mask] = fill_high
+    return gradient
+
+
 def analyze_slice_peaks_voronoi(nuc_prob_slice, dapi_slice, cellarea_slice, config):
     prob = nuc_prob_slice.astype(np.float32)
     disc_mask = make_combined_disc_mask(dapi_slice, cellarea_slice, config)
@@ -290,7 +305,8 @@ def analyze_slice_peaks_voronoi(nuc_prob_slice, dapi_slice, cellarea_slice, conf
     seeds = np.zeros_like(prob, dtype=int)
     for i, (r, c) in enumerate(final_peaks, start=1):
         seeds[r, c] = i
-    voronoi_labels = watershed(np.zeros_like(prob, dtype=float), markers=seeds, mask=disc_mask)
+    gradient = make_watershed_gradient(cellarea_slice, disc_mask, config)
+    voronoi_labels = watershed(gradient, markers=seeds, mask=disc_mask)
     return disc_mask, final_peaks, voronoi_labels
 
 
@@ -806,6 +822,7 @@ def process_disc_folder(folder, config, log_fn=print):
 def run_pipeline(root_dir, config, log_fn=print):
     log_fn(f"Using ROOT folder: {root_dir}")
     log_fn(f"Pixel size: {config['pixel_size_um']} um/px")
+    log_fn(f"Gap-guided watershed: {config.get('use_cellarea_gap_guided_watershed', False)}")
     log_fn(f"AP intensity profile: {config.get('compute_ap_intensity_profile', False)}")
     log_fn(f"DV intensity profile: {config.get('compute_dv_intensity_profile', False)}")
     disc_folders = find_disc_folders(root_dir, log_fn=log_fn)
@@ -837,6 +854,7 @@ class OceanWingsGUI:
         self.core_peak_dist_var = tk.StringVar(value=str(DEFAULT_CONFIG["core_peak_min_distance"]))
         self.gaussian_sigma_var = tk.StringVar(value=str(DEFAULT_CONFIG["gaussian_sigma"]))
         self.core_peak_thr_var = tk.StringVar(value=str(DEFAULT_CONFIG["core_peak_prob_threshold"]))
+        self.gap_guided_watershed_var = tk.BooleanVar(value=DEFAULT_CONFIG["use_cellarea_gap_guided_watershed"])
         self.hdb_min_cluster_var = tk.StringVar(value=str(DEFAULT_CONFIG["hdbscan_min_cluster_size"]))
         self.hdb_min_samples_var = tk.StringVar(value=str(DEFAULT_CONFIG["hdbscan_min_samples"]))
         self.hdb_cv_max_var = tk.StringVar(value=str(DEFAULT_CONFIG["hdbscan_nn_cv_max"]))
@@ -881,6 +899,11 @@ class OceanWingsGUI:
         ttk.Entry(frame_peaks, textvariable=self.gaussian_sigma_var, width=10).grid(row=1, column=1, padx=5, pady=2)
         ttk.Label(frame_peaks, text="Core peak prob threshold:").grid(row=1, column=2, sticky="w", padx=5, pady=2)
         ttk.Entry(frame_peaks, textvariable=self.core_peak_thr_var, width=10).grid(row=1, column=3, padx=5, pady=2)
+        ttk.Checkbutton(
+            frame_peaks,
+            text="Use cell-area/gap probability to guide watershed boundaries",
+            variable=self.gap_guided_watershed_var,
+        ).grid(row=2, column=0, columnspan=4, sticky="w", padx=5, pady=2)
 
         frame_hdb = ttk.LabelFrame(self.master, text="4. HDBSCAN clustering (per slice)")
         frame_hdb.pack(fill="x", padx=10, pady=5)
@@ -942,6 +965,7 @@ class OceanWingsGUI:
 
         cfg["use_dapi_for_disc_mask"] = bool(self.use_dapi_var.get())
         cfg["dapi_adaptive"] = bool(self.dapi_adaptive_var.get())
+        cfg["use_cellarea_gap_guided_watershed"] = bool(self.gap_guided_watershed_var.get())
         cfg["large_output"] = bool(self.large_output_var.get())
         cfg["save_voronoi_labels"] = bool(self.save_voronoi_var.get())
         cfg["compute_ap_intensity_profile"] = bool(self.compute_ap_profile_var.get())
@@ -965,6 +989,7 @@ class OceanWingsGUI:
         self.log("Starting OceanWings pipeline...")
         self.log(f"Root folder: {root_dir}")
         self.log(f"Pixel size: {cfg['pixel_size_um']} um/px")
+        self.log(f"Gap-guided watershed: {cfg['use_cellarea_gap_guided_watershed']}")
         self.log(f"AP intensity profile: {cfg['compute_ap_intensity_profile']}")
         self.log(f"DV intensity profile: {cfg['compute_dv_intensity_profile']}")
         try:
