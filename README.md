@@ -23,7 +23,9 @@ By default, the watershed boundaries are guided by the cell-area/gap probability
 
 Optional staining-channel profiles can be exported along the modal-slice AP axis, DV axis, or both.
 
-Whole-disc shape measurements in `_WingDiscShape.csv` use the convex hull around the modal-slice disc mask, so weak internal DAPI regions do not reduce the reported disc area.
+Whole-disc shape measurements in files like `disc001_wing_disc_shape.csv` use the convex hull around the modal-slice disc mask, so weak internal DAPI regions do not reduce the reported disc area.
+
+Per-disc outputs are numbered in sorted folder order, for example `disc001_cellareas.csv`, `disc001_peaks.csv`, and `disc001_modal_discmask.png`.
 
 ## Notes
 

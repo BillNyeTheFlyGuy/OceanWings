@@ -17,6 +17,12 @@ Thumbs.db
 *_WingDiscShape.csv
 *_APIntensityProfile.csv
 *_DVIntensityProfile.csv
+disc*_cellareas.csv
+disc*_peaks.csv
+disc*_clusters.csv
+disc*_wing_disc_shape.csv
+disc*_ap_intensity_profile.csv
+disc*_dv_intensity_profile.csv
 _CellAreas.csv
 _Peaks.csv
 _Clusters.csv

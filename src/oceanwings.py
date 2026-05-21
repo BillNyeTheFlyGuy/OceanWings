@@ -494,7 +494,18 @@ def _axis_is_available(axis_px, r0, c0, r1, c1):
     return not np.isnan(axis_px) and None not in (r0, c0, r1, c1)
 
 
-def _write_intensity_profile_csv(folder, axis_name, stain_image, start_rc, end_rc, axis_px, pixel_size_um, disc_name, modal_z):
+def _write_intensity_profile_csv(
+    folder,
+    output_prefix,
+    axis_name,
+    stain_image,
+    start_rc,
+    end_rc,
+    axis_px,
+    pixel_size_um,
+    disc_name,
+    modal_z,
+):
     profile = profile_line(stain_image, start_rc, end_rc, mode="constant", order=1)
     if profile.size == 0:
         return None
@@ -502,7 +513,7 @@ def _write_intensity_profile_csv(folder, axis_name, stain_image, start_rc, end_r
     dist_px = np.linspace(0.0, axis_px, profile.size, dtype=float)
     max_intensity = np.max(profile)
     profile_norm = profile / max_intensity if max_intensity > 0 else np.full_like(profile, np.nan, dtype=float)
-    profile_csv_path = os.path.join(folder, f"_{axis_name}IntensityProfile.csv")
+    profile_csv_path = os.path.join(folder, f"{output_prefix}_{axis_name.lower()}_intensity_profile.csv")
 
     rows = [
         [
@@ -524,8 +535,8 @@ def _write_intensity_profile_csv(folder, axis_name, stain_image, start_rc, end_r
     return profile_csv_path
 
 
-def _save_axis_on_staining(out_dir, disc_name, modal_z, stain_slice, axis_name, color, start_rc, end_rc):
-    stain_png_path = os.path.join(out_dir, f"_modal_{axis_name}_on_Staining.png")
+def _save_axis_on_staining(out_dir, output_prefix, disc_name, modal_z, stain_slice, axis_name, color, start_rc, end_rc):
+    stain_png_path = os.path.join(out_dir, f"{output_prefix}_modal_{axis_name.lower()}_on_staining.png")
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(exposure.rescale_intensity(stain_slice, in_range="image", out_range=(0, 1)), cmap="gray")
     ax.plot([start_rc[1], end_rc[1]], [start_rc[0], end_rc[0]], color=color, linewidth=2, label=f"{axis_name} sampling line")
@@ -540,6 +551,7 @@ def _save_axis_on_staining(out_dir, disc_name, modal_z, stain_slice, axis_name, 
 
 def _save_modal_images(
     out_dir,
+    output_prefix,
     disc_name,
     modal_z,
     modal_dapi,
@@ -565,11 +577,11 @@ def _save_modal_images(
     ax.set_title(f"{disc_name} - modal z={modal_z} | peaks: {modal_coords.shape[0]}")
     ax.axis("off")
     fig.tight_layout()
-    modal_png_path = os.path.join(out_dir, "_modal_z_overlay.png")
+    modal_png_path = os.path.join(out_dir, f"{output_prefix}_modal_z_overlay.png")
     fig.savefig(modal_png_path, dpi=200)
     plt.close(fig)
 
-    discmask_png_path = os.path.join(out_dir, "_modal_discmask.png")
+    discmask_png_path = os.path.join(out_dir, f"{output_prefix}_modal_discmask.png")
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(exposure.rescale_intensity(modal_dapi, in_range="image", out_range=(0, 1)), cmap="gray")
     ax.contour(modal_mask, levels=[0.5], colors="red", linewidths=1.5)
@@ -582,7 +594,7 @@ def _save_modal_images(
     plt.close(fig)
 
     AP_axis_px, DV_axis_px, ap_r0, ap_c0, ap_r1, ap_c1, dv_r0, dv_c0, dv_r1, dv_c1 = axes
-    axes_dapi_png_path = os.path.join(out_dir, "_modal_axes_on_DAPI.png")
+    axes_dapi_png_path = os.path.join(out_dir, f"{output_prefix}_modal_axes_on_dapi.png")
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(exposure.rescale_intensity(modal_dapi, in_range="image", out_range=(0, 1)), cmap="gray")
     if not np.isnan(AP_axis_px) and None not in (ap_r0, ap_c0, ap_r1, ap_c1):
@@ -601,6 +613,7 @@ def _save_modal_images(
         for axis_name, color, start_rc, end_rc in profile_axes:
             stain_png_paths[axis_name] = _save_axis_on_staining(
                 out_dir,
+                output_prefix,
                 disc_name,
                 modal_z,
                 stain_slice,
@@ -613,9 +626,10 @@ def _save_modal_images(
     return modal_png_path, discmask_png_path, axes_dapi_png_path, stain_png_paths
 
 
-def process_disc_folder(folder, config, log_fn=print):
+def process_disc_folder(folder, config, disc_index, log_fn=print):
     disc_name = os.path.basename(folder.rstrip(os.sep))
-    log_fn(f"\nProcessing disc folder: {disc_name}")
+    output_prefix = f"disc{disc_index:03d}"
+    log_fn(f"\nProcessing disc folder: {disc_name} ({output_prefix})")
     out_dir = os.path.join(folder, "_nuclei_output")
     ensure_dir(out_dir)
 
@@ -684,13 +698,13 @@ def process_disc_folder(folder, config, log_fn=print):
             ax.set_title(f"{disc_name} - z={z} | peaks: {num_peaks}")
             ax.axis("off")
             fig.tight_layout()
-            fig.savefig(os.path.join(out_dir, f"z{z:03d}_overlay.png"), dpi=200)
+            fig.savefig(os.path.join(out_dir, f"{output_prefix}_z{z:03d}_overlay.png"), dpi=200)
             plt.close(fig)
 
     disc_mask_stack = np.stack(disc_masks, axis=0)
     voronoi_labels_stack = np.stack(voronoi_labels_list, axis=0)
     if config["save_voronoi_labels"]:
-        tiff.imwrite(os.path.join(out_dir, "_VoronoiLabels.tif"), voronoi_labels_stack.astype(np.uint16))
+        tiff.imwrite(os.path.join(out_dir, f"{output_prefix}_voronoi_labels.tif"), voronoi_labels_stack.astype(np.uint16))
 
     cellareas_rows = []
     for slice_data, disc_mask in zip(peaks_slices, disc_masks):
@@ -700,7 +714,7 @@ def process_disc_folder(folder, config, log_fn=print):
         mean_va = float(np.mean(varea_non_nan)) if coords.shape[0] and varea_non_nan.size else np.nan
         median_va = float(np.median(varea_non_nan)) if coords.shape[0] and varea_non_nan.size else np.nan
         cellareas_rows.append([z, coords.shape[0], int(np.sum(disc_mask)), _fmt_nan(mean_va), _fmt_nan(mean_va * area_factor_um2), _fmt_nan(median_va), _fmt_nan(median_va * area_factor_um2)])
-    cellareas_csv_path = os.path.join(folder, "_CellAreas.csv")
+    cellareas_csv_path = os.path.join(folder, f"{output_prefix}_cellareas.csv")
     _write_csv(cellareas_csv_path, "z_index,num_nuclei,disc_area_pixels,mean_voronoi_area_pixels,mean_voronoi_area_um2,median_voronoi_area_pixels,median_voronoi_area_um2", cellareas_rows)
 
     cluster_summaries, peak_cluster_labels = cluster_peaks_hdbscan(peaks_slices, config, log_fn=log_fn)
@@ -714,13 +728,13 @@ def process_disc_folder(folder, config, log_fn=print):
             va_px2 = slice_data["varea"][idx] if idx < slice_data["varea"].size else np.nan
             cl_label = peak_cluster_labels.get((z, idx), -1)
             peaks_rows.append([z, idx, int(r), int(c), f"{slice_data['prob'][idx]:.6f}", _fmt_nan(d_px), _fmt_nan(d_px * pixel_size_um), _fmt_nan(va_px2), _fmt_nan(va_px2 * area_factor_um2), cl_label, 1 if cl_label >= 0 else 0])
-    peaks_csv_path = os.path.join(folder, "_Peaks.csv")
+    peaks_csv_path = os.path.join(folder, f"{output_prefix}_peaks.csv")
     _write_csv(peaks_csv_path, "z_index,idx_in_slice,y,x,nuclei_prob,nn_distance_pixels,nn_distance_um,voronoi_area_pixels,voronoi_area_um2,cluster_label,high_conf", peaks_rows)
 
     clusters_rows = []
     for z, cl, n, mean_d, sd_d, cv, median_d, median_varea, est_area_hex_px2, est_area_vor_px2 in cluster_summaries:
         clusters_rows.append([z, cl, n, _fmt_nan(mean_d), _fmt_nan(mean_d * pixel_size_um), _fmt_nan(sd_d), _fmt_nan(cv), _fmt_nan(median_d), _fmt_nan(median_d * pixel_size_um), _fmt_nan(median_varea), _fmt_nan(est_area_hex_px2), _fmt_nan(est_area_hex_px2 * area_factor_um2), _fmt_nan(est_area_vor_px2), _fmt_nan(est_area_vor_px2 * area_factor_um2)])
-    clusters_csv_path = os.path.join(folder, "_Clusters.csv")
+    clusters_csv_path = os.path.join(folder, f"{output_prefix}_clusters.csv")
     _write_csv(clusters_csv_path, "z_index,cluster_label,num_nuclei,mean_nn,mean_nn_um,sd_nn,cv_nn,median_nn,median_nn_um,median_voronoi_area_pixels,est_cell_area_hex_pixels2,est_cell_area_hex_um2,est_cell_area_voronoi_pixels2,est_cell_area_voronoi_um2", clusters_rows)
 
     modal_z = choose_modal_z_from_peaks(peak_counts)
@@ -761,7 +775,7 @@ def process_disc_folder(folder, config, log_fn=print):
             stain_integrated_bgsub = float(np.sum(vals_bgsub))
             loc_entropy, loc_area80 = compute_whole_disc_localisation_metrics(vals_bgsub)
 
-    shape_csv_path = os.path.join(folder, "_WingDiscShape.csv")
+    shape_csv_path = os.path.join(folder, f"{output_prefix}_wing_disc_shape.csv")
     aspect_ratio = DV_axis_px / AP_axis_px if (not np.isnan(DV_axis_px) and AP_axis_px > 0) else np.nan
     shape_row = [
         disc_name, modal_z, _fmt_nan(wing_area_px2, 3), _fmt_nan(wing_area_px2 * area_factor_um2, 3),
@@ -780,6 +794,7 @@ def process_disc_folder(folder, config, log_fn=print):
     if compute_ap_profile and stain_maxproj is not None and _axis_is_available(AP_axis_px, ap_r0, ap_c0, ap_r1, ap_c1):
         profile_csv_paths["AP"] = _write_intensity_profile_csv(
             folder,
+            output_prefix,
             "AP",
             stain_maxproj,
             (ap_r0, ap_c0),
@@ -793,6 +808,7 @@ def process_disc_folder(folder, config, log_fn=print):
     if compute_dv_profile and stain_maxproj is not None and _axis_is_available(DV_axis_px, dv_r0, dv_c0, dv_r1, dv_c1):
         profile_csv_paths["DV"] = _write_intensity_profile_csv(
             folder,
+            output_prefix,
             "DV",
             stain_maxproj,
             (dv_r0, dv_c0),
@@ -807,6 +823,7 @@ def process_disc_folder(folder, config, log_fn=print):
     modal_slice_data = [slice_data for slice_data in peaks_slices if slice_data["z"] == modal_z][0]
     modal_png_path, discmask_png_path, axes_dapi_png_path, stain_png_paths = _save_modal_images(
         out_dir,
+        output_prefix,
         disc_name,
         modal_z,
         dapi_stack[modal_z],
@@ -845,9 +862,9 @@ def run_pipeline(root_dir, config, log_fn=print):
         log_fn("No disc folders found (no directories with .tif/.tiff). Check that you selected the correct folder.")
         return
     log_fn(f"Found {len(disc_folders)} disc folder(s).")
-    for folder in disc_folders:
+    for disc_index, folder in enumerate(disc_folders, start=1):
         try:
-            process_disc_folder(folder, config, log_fn=log_fn)
+            process_disc_folder(folder, config, disc_index, log_fn=log_fn)
         except Exception as exc:
             log_fn(f"ERROR processing {folder}: {exc}")
 
