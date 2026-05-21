@@ -16,11 +16,13 @@ Thumbs.db
 *_Clusters.csv
 *_WingDiscShape.csv
 *_APIntensityProfile.csv
+*_DVIntensityProfile.csv
 _CellAreas.csv
 _Peaks.csv
 _Clusters.csv
 _WingDiscShape.csv
 _APIntensityProfile.csv
+_DVIntensityProfile.csv
 _nuclei_output/
 *_VoronoiLabels.tif
 

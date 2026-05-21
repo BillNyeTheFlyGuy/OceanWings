@@ -1,6 +1,6 @@
 # OceanWings
 
-OceanWings is a Python/Tkinter tool for Drosophila wing disc nuclei detection, Voronoi cell-area estimation, wing-shape metrics, and optional AP staining intensity profiles.
+OceanWings is a Python/Tkinter tool for Drosophila wing disc nuclei detection, Voronoi cell-area estimation, wing-shape metrics, and optional AP/DV staining intensity profiles.
 
 ## Setup
 
@@ -18,6 +18,8 @@ python src/oceanwings.py
 ```
 
 Use the GUI to select the root folder containing disc folders. Each disc folder should contain DAPI TIFF slices and matching Ilastik HDF5 probability maps.
+
+Optional staining-channel profiles can be exported along the modal-slice AP axis, DV axis, or both.
 
 ## Notes
 

@@ -55,6 +55,7 @@ DEFAULT_CONFIG = {
     "large_output": False,
     "save_voronoi_labels": False,
     "compute_ap_intensity_profile": False,
+    "compute_dv_intensity_profile": False,
     "random_seed": 42,
 }
 
@@ -463,7 +464,68 @@ def _write_csv(path, header, rows):
             handle.write(",".join(str(value) for value in row) + "\n")
 
 
-def _save_modal_images(out_dir, disc_name, modal_z, modal_dapi, modal_mask, modal_labels, modal_coords, hull, axes, stain_slice=None):
+def _axis_is_available(axis_px, r0, c0, r1, c1):
+    return not np.isnan(axis_px) and None not in (r0, c0, r1, c1)
+
+
+def _write_intensity_profile_csv(folder, axis_name, stain_image, start_rc, end_rc, axis_px, pixel_size_um, disc_name, modal_z):
+    profile = profile_line(stain_image, start_rc, end_rc, mode="constant", order=1)
+    if profile.size == 0:
+        return None
+
+    dist_px = np.linspace(0.0, axis_px, profile.size, dtype=float)
+    max_intensity = np.max(profile)
+    profile_norm = profile / max_intensity if max_intensity > 0 else np.full_like(profile, np.nan, dtype=float)
+    profile_csv_path = os.path.join(folder, f"_{axis_name}IntensityProfile.csv")
+
+    rows = [
+        [
+            disc_name,
+            modal_z,
+            i,
+            f"{dist_px[i]:.6f}",
+            f"{dist_px[i] * pixel_size_um:.6f}",
+            f"{profile[i]:.6f}",
+            _fmt_nan(profile_norm[i]),
+        ]
+        for i in range(profile.size)
+    ]
+    _write_csv(
+        profile_csv_path,
+        "disc_name,modal_z_index,index,distance_pixels,distance_um,intensity_raw,intensity_norm",
+        rows,
+    )
+    return profile_csv_path
+
+
+def _save_axis_on_staining(out_dir, disc_name, modal_z, stain_slice, axis_name, color, start_rc, end_rc):
+    stain_png_path = os.path.join(out_dir, f"_modal_{axis_name}_on_Staining.png")
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(exposure.rescale_intensity(stain_slice, in_range="image", out_range=(0, 1)), cmap="gray")
+    ax.plot([start_rc[1], end_rc[1]], [start_rc[0], end_rc[0]], color=color, linewidth=2, label=f"{axis_name} sampling line")
+    ax.set_title(f"{disc_name} - {axis_name} intensity line (modal z={modal_z})")
+    ax.axis("off")
+    ax.legend(loc="upper right", fontsize=6)
+    fig.tight_layout()
+    fig.savefig(stain_png_path, dpi=200)
+    plt.close(fig)
+    return stain_png_path
+
+
+def _save_modal_images(
+    out_dir,
+    disc_name,
+    modal_z,
+    modal_dapi,
+    modal_mask,
+    modal_labels,
+    modal_coords,
+    hull,
+    axes,
+    stain_slice=None,
+    profile_axes=None,
+):
+    profile_axes = profile_axes or []
     modal_overlay = label2rgb(
         modal_labels,
         image=exposure.rescale_intensity(modal_dapi, in_range="image", out_range=(0, 1)),
@@ -508,20 +570,21 @@ def _save_modal_images(out_dir, disc_name, modal_z, modal_dapi, modal_mask, moda
     fig.savefig(axes_dapi_png_path, dpi=200)
     plt.close(fig)
 
-    ap_stain_png_path = None
-    if stain_slice is not None and not np.isnan(AP_axis_px) and None not in (ap_r0, ap_c0, ap_r1, ap_c1):
-        ap_stain_png_path = os.path.join(out_dir, "_modal_AP_on_Staining.png")
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.imshow(exposure.rescale_intensity(stain_slice, in_range="image", out_range=(0, 1)), cmap="gray")
-        ax.plot([ap_c0, ap_c1], [ap_r0, ap_r1], color="red", linewidth=2, label="AP sampling line")
-        ax.set_title(f"{disc_name} - AP intensity line (modal z={modal_z})")
-        ax.axis("off")
-        ax.legend(loc="upper right", fontsize=6)
-        fig.tight_layout()
-        fig.savefig(ap_stain_png_path, dpi=200)
-        plt.close(fig)
+    stain_png_paths = {}
+    if stain_slice is not None:
+        for axis_name, color, start_rc, end_rc in profile_axes:
+            stain_png_paths[axis_name] = _save_axis_on_staining(
+                out_dir,
+                disc_name,
+                modal_z,
+                stain_slice,
+                axis_name,
+                color,
+                start_rc,
+                end_rc,
+            )
 
-    return modal_png_path, discmask_png_path, axes_dapi_png_path, ap_stain_png_path
+    return modal_png_path, discmask_png_path, axes_dapi_png_path, stain_png_paths
 
 
 def process_disc_folder(folder, config, log_fn=print):
@@ -533,10 +596,12 @@ def process_disc_folder(folder, config, log_fn=print):
     pixel_size_um = float(config["pixel_size_um"])
     area_factor_um2 = pixel_size_um**2
     compute_ap_profile = bool(config.get("compute_ap_intensity_profile", False))
+    compute_dv_profile = bool(config.get("compute_dv_intensity_profile", False))
+    compute_any_axis_profile = compute_ap_profile or compute_dv_profile
 
     dapi_stack, stain_stack, dapi_paths, stain_ok = load_dapi_and_stain_stacks(folder)
-    if compute_ap_profile and (stain_stack is None or not stain_ok):
-        log_fn(f"  WARNING: AP intensity profile requested but cannot align staining stack for disc '{disc_name}'.")
+    if compute_any_axis_profile and (stain_stack is None or not stain_ok):
+        log_fn(f"  WARNING: axis intensity profile requested but cannot align staining stack for disc '{disc_name}'.")
         stain_stack = None
 
     nuc_prob_stack, cellarea_stack = load_prob_stack_for_tifs(folder, dapi_paths, config)
@@ -651,7 +716,7 @@ def process_disc_folder(folder, config, log_fn=print):
         if hull_props:
             axes = compute_ap_dv_chords_from_props(hull_props[0], modal_mask.shape)
 
-    AP_axis_px, DV_axis_px, ap_r0, ap_c0, ap_r1, ap_c1, _dv_r0, _dv_c0, _dv_r1, _dv_c1 = axes
+    AP_axis_px, DV_axis_px, ap_r0, ap_c0, ap_r1, ap_c1, dv_r0, dv_c0, dv_r1, dv_c1 = axes
     stain_mean_raw = stain_median_raw = stain_integrated_raw = stain_mean_bgsub = stain_integrated_bgsub = loc_entropy = loc_area80 = np.nan
     if stain_maxproj is not None and hull is not None:
         vals_disc = stain_maxproj[hull].astype(float)
@@ -679,17 +744,37 @@ def process_disc_folder(folder, config, log_fn=print):
     ]
     _write_csv(shape_csv_path, "disc_name,modal_z_index,area_pixels,area_um2,perimeter_pixels,perimeter_um,AP_axis_length_pixels,AP_axis_length_um,DV_axis_length_pixels,DV_axis_length_um,aspect_ratio_DV_over_AP,centroid_y,centroid_x,stain_mean_raw,stain_median_raw,stain_integrated_raw,stain_mean_bgsub,stain_integrated_bgsub,loc_entropy,loc_area80", [shape_row])
 
-    ap_profile_csv_path = None
-    if compute_ap_profile and stain_maxproj is not None and not np.isnan(AP_axis_px) and None not in (ap_r0, ap_c0, ap_r1, ap_c1):
-        profile = profile_line(stain_maxproj, (ap_r0, ap_c0), (ap_r1, ap_c1), mode="constant", order=1)
-        if profile.size > 0:
-            dist_px = np.linspace(0.0, AP_axis_px, profile.size, dtype=float)
-            profile_norm = profile / np.max(profile) if np.max(profile) > 0 else np.full_like(profile, np.nan, dtype=float)
-            ap_profile_csv_path = os.path.join(folder, "_APIntensityProfile.csv")
-            _write_csv(ap_profile_csv_path, "disc_name,modal_z_index,index,distance_pixels,distance_um,intensity_raw,intensity_norm", [[disc_name, modal_z, i, f"{dist_px[i]:.6f}", f"{dist_px[i] * pixel_size_um:.6f}", f"{profile[i]:.6f}", _fmt_nan(profile_norm[i])] for i in range(profile.size)])
+    profile_csv_paths = {}
+    profile_axes = []
+    if compute_ap_profile and stain_maxproj is not None and _axis_is_available(AP_axis_px, ap_r0, ap_c0, ap_r1, ap_c1):
+        profile_csv_paths["AP"] = _write_intensity_profile_csv(
+            folder,
+            "AP",
+            stain_maxproj,
+            (ap_r0, ap_c0),
+            (ap_r1, ap_c1),
+            AP_axis_px,
+            pixel_size_um,
+            disc_name,
+            modal_z,
+        )
+        profile_axes.append(("AP", "red", (ap_r0, ap_c0), (ap_r1, ap_c1)))
+    if compute_dv_profile and stain_maxproj is not None and _axis_is_available(DV_axis_px, dv_r0, dv_c0, dv_r1, dv_c1):
+        profile_csv_paths["DV"] = _write_intensity_profile_csv(
+            folder,
+            "DV",
+            stain_maxproj,
+            (dv_r0, dv_c0),
+            (dv_r1, dv_c1),
+            DV_axis_px,
+            pixel_size_um,
+            disc_name,
+            modal_z,
+        )
+        profile_axes.append(("DV", "blue", (dv_r0, dv_c0), (dv_r1, dv_c1)))
 
     modal_slice_data = [slice_data for slice_data in peaks_slices if slice_data["z"] == modal_z][0]
-    modal_png_path, discmask_png_path, axes_dapi_png_path, ap_stain_png_path = _save_modal_images(
+    modal_png_path, discmask_png_path, axes_dapi_png_path, stain_png_paths = _save_modal_images(
         out_dir,
         disc_name,
         modal_z,
@@ -699,20 +784,22 @@ def process_disc_folder(folder, config, log_fn=print):
         modal_slice_data["coords"],
         hull,
         axes,
-        stain_stack[modal_z] if compute_ap_profile and stain_stack is not None else None,
+        stain_stack[modal_z] if profile_axes and stain_stack is not None else None,
+        profile_axes,
     )
 
     log_fn(f"  -> CellAreas CSV         : {cellareas_csv_path}")
     log_fn(f"  -> Peaks CSV             : {peaks_csv_path}")
     log_fn(f"  -> Clusters CSV          : {clusters_csv_path}")
     log_fn(f"  -> WingDiscShape CSV     : {shape_csv_path}")
-    if ap_profile_csv_path is not None:
-        log_fn(f"  -> APIntensityProfile CSV: {ap_profile_csv_path}")
+    for axis_name, profile_csv_path in profile_csv_paths.items():
+        if profile_csv_path is not None:
+            log_fn(f"  -> {axis_name}IntensityProfile CSV: {profile_csv_path}")
     log_fn(f"  -> Modal overlay PNG     : {modal_png_path}")
     log_fn(f"  -> Disc mask PNG         : {discmask_png_path}")
     log_fn(f"  -> Axes on DAPI PNG      : {axes_dapi_png_path}")
-    if ap_stain_png_path is not None:
-        log_fn(f"  -> AP on Staining PNG    : {ap_stain_png_path}")
+    for axis_name, stain_png_path in stain_png_paths.items():
+        log_fn(f"  -> {axis_name} on Staining PNG    : {stain_png_path}")
     log_fn(f"  -> Modal z slice         : {modal_z} (max peaks)")
 
 
@@ -720,6 +807,7 @@ def run_pipeline(root_dir, config, log_fn=print):
     log_fn(f"Using ROOT folder: {root_dir}")
     log_fn(f"Pixel size: {config['pixel_size_um']} um/px")
     log_fn(f"AP intensity profile: {config.get('compute_ap_intensity_profile', False)}")
+    log_fn(f"DV intensity profile: {config.get('compute_dv_intensity_profile', False)}")
     disc_folders = find_disc_folders(root_dir, log_fn=log_fn)
     if not disc_folders:
         log_fn("No disc folders found (no directories with .tif/.tiff). Check that you selected the correct folder.")
@@ -755,6 +843,7 @@ class OceanWingsGUI:
         self.large_output_var = tk.BooleanVar(value=DEFAULT_CONFIG["large_output"])
         self.save_voronoi_var = tk.BooleanVar(value=DEFAULT_CONFIG["save_voronoi_labels"])
         self.compute_ap_profile_var = tk.BooleanVar(value=DEFAULT_CONFIG["compute_ap_intensity_profile"])
+        self.compute_dv_profile_var = tk.BooleanVar(value=DEFAULT_CONFIG["compute_dv_intensity_profile"])
         self._build_widgets()
 
     def _build_widgets(self):
@@ -807,6 +896,7 @@ class OceanWingsGUI:
         ttk.Checkbutton(frame_out, text="Generate BIG outputs (Voronoi overlay for EVERY z-slice)", variable=self.large_output_var).grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=2)
         ttk.Checkbutton(frame_out, text="Save Voronoi label stacks (TIFF)", variable=self.save_voronoi_var).grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=2)
         ttk.Checkbutton(frame_out, text="Compute AP intensity profile along staining channel (modal z)", variable=self.compute_ap_profile_var).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+        ttk.Checkbutton(frame_out, text="Compute DV intensity profile along staining channel (modal z)", variable=self.compute_dv_profile_var).grid(row=3, column=0, columnspan=2, sticky="w", padx=5, pady=2)
 
         frame_run = ttk.Frame(self.master)
         frame_run.pack(fill="x", padx=10, pady=5)
@@ -855,6 +945,7 @@ class OceanWingsGUI:
         cfg["large_output"] = bool(self.large_output_var.get())
         cfg["save_voronoi_labels"] = bool(self.save_voronoi_var.get())
         cfg["compute_ap_intensity_profile"] = bool(self.compute_ap_profile_var.get())
+        cfg["compute_dv_intensity_profile"] = bool(self.compute_dv_profile_var.get())
         return cfg
 
     def run_pipeline_gui(self):
@@ -875,6 +966,7 @@ class OceanWingsGUI:
         self.log(f"Root folder: {root_dir}")
         self.log(f"Pixel size: {cfg['pixel_size_um']} um/px")
         self.log(f"AP intensity profile: {cfg['compute_ap_intensity_profile']}")
+        self.log(f"DV intensity profile: {cfg['compute_dv_intensity_profile']}")
         try:
             run_pipeline(root_dir, cfg, log_fn=self.log)
             self.log("Done.")
