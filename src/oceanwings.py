@@ -225,23 +225,33 @@ def make_disc_mask_from_dapi(dapi_slice, config):
     img_for_thr = gaussian(img, sigma=sigma_mask, preserve_range=True) if sigma_mask > 0 else img
     thresh = filters.threshold_otsu(img_for_thr) if config["dapi_adaptive"] else config["dapi_fixed_threshold"] / 65535.0
     mask = img_for_thr > thresh
-    mask = morphology.remove_small_objects(mask, 100)
-    mask = morphology.remove_small_holes(mask, 100)
-    return morphology.binary_opening(mask, footprint=disk(3))
+    mask = remove_objects_smaller_than(mask, 100)
+    mask = remove_holes_smaller_than(mask, 100)
+    return morphology.opening(mask, footprint=disk(3))
+
+
+def remove_objects_smaller_than(mask, min_size):
+    # scikit-image 0.26 renamed min_size to max_size and made the cutoff inclusive.
+    return morphology.remove_small_objects(mask, max_size=int(min_size) - 1)
+
+
+def remove_holes_smaller_than(mask, max_hole_area):
+    # Preserve the old strictly-smaller-than behavior by subtracting one pixel.
+    return morphology.remove_small_holes(mask, max_size=int(max_hole_area) - 1)
 
 
 def make_combined_disc_mask(dapi_slice, _cellarea_slice, config):
     disc_mask = np.ones_like(dapi_slice, dtype=bool)
     if config["use_dapi_for_disc_mask"]:
         disc_mask &= make_disc_mask_from_dapi(dapi_slice, config)
-    disc_mask = morphology.remove_small_objects(disc_mask, 100)
-    disc_mask = morphology.remove_small_holes(disc_mask, 100)
-    disc_mask = morphology.binary_opening(disc_mask, footprint=disk(3))
+    disc_mask = remove_objects_smaller_than(disc_mask, 100)
+    disc_mask = remove_holes_smaller_than(disc_mask, 100)
+    disc_mask = morphology.opening(disc_mask, footprint=disk(3))
 
     radius = int(config.get("trachea_opening_radius", 0))
     if radius > 0:
         selem = disk(radius)
-        disc_mask = morphology.binary_dilation(morphology.binary_erosion(disc_mask, footprint=selem), footprint=selem)
+        disc_mask = morphology.dilation(morphology.erosion(disc_mask, footprint=selem), footprint=selem)
     return disc_mask
 
 
