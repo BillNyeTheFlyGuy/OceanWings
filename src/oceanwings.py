@@ -734,13 +734,18 @@ def process_disc_folder(folder, config, log_fn=print):
     hull = None
     if props:
         largest = max(props, key=lambda prop: prop.area)
-        wing_area_px2 = float(largest.area)
-        wing_perimeter_px = float(largest.perimeter)
-        cy, cx = largest.centroid
         hull = convex_hull_image(labeled == largest.label)
         hull_props = measure.regionprops(measure.label(hull, connectivity=1))
         if hull_props:
-            axes = compute_ap_dv_chords_from_props(hull_props[0], modal_mask.shape)
+            hull_region = hull_props[0]
+            wing_area_px2 = float(hull_region.area)
+            wing_perimeter_px = float(hull_region.perimeter)
+            cy, cx = hull_region.centroid
+            axes = compute_ap_dv_chords_from_props(hull_region, modal_mask.shape)
+        else:
+            wing_area_px2 = float(largest.area)
+            wing_perimeter_px = float(largest.perimeter)
+            cy, cx = largest.centroid
 
     AP_axis_px, DV_axis_px, ap_r0, ap_c0, ap_r1, ap_c1, dv_r0, dv_c0, dv_r1, dv_c1 = axes
     stain_mean_raw = stain_median_raw = stain_integrated_raw = stain_mean_bgsub = stain_integrated_bgsub = loc_entropy = loc_area80 = np.nan

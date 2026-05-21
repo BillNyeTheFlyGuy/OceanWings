@@ -23,6 +23,8 @@ By default, the watershed boundaries are guided by the cell-area/gap probability
 
 Optional staining-channel profiles can be exported along the modal-slice AP axis, DV axis, or both.
 
+Whole-disc shape measurements in `_WingDiscShape.csv` use the convex hull around the modal-slice disc mask, so weak internal DAPI regions do not reduce the reported disc area.
+
 ## Notes
 
 - HDBSCAN is optional at runtime. If it is not installed, clustering and high-confidence cluster labels are skipped.
